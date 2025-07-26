@@ -4,6 +4,41 @@ import tempfile
 import os
 
 
+def format_imports(lines):
+    """Align import statements so 'from' keywords line up."""
+    import_lines = []
+    import_indices = []
+    
+    # Pattern to match import statements
+    import_pattern = r"^(\s*)(import\s+\{[^}]+\})\s+(from\s+.+)$"
+    
+    for i, line in enumerate(lines):
+        match = re.match(import_pattern, line)
+        if match:
+            indent = match.group(1)
+            import_part = match.group(2)  # "import {Name}"
+            from_part = match.group(3)    # "from ..."
+            
+            import_lines.append({
+                "index": i,
+                "indent": indent,
+                "import_part": import_part,
+                "from_part": from_part
+            })
+            import_indices.append(i)
+    
+    # Find the longest import part and align accordingly
+    if import_lines:
+        max_length = max(len(imp["import_part"]) for imp in import_lines)
+        
+        for imp in import_lines:
+            spaces_needed = max_length - len(imp["import_part"]) + 1  # +1 for separation
+            padding = " " * spaces_needed
+            lines[imp["index"]] = f"{imp['indent']}{imp['import_part']}{padding}{imp['from_part']}"
+    
+    return lines
+
+
 def format_function_declarations(lines):
     new_lines = []
     # Updated pattern to capture any modifiers after visibility
@@ -239,5 +274,8 @@ def format_solidity(code):
 
     # Add operator spacing
     lines = format_operator_spacing(lines)
+
+    # Format imports
+    lines = format_imports(lines)
 
     return "\n".join(lines)

@@ -561,7 +561,7 @@ def format_require_statements(lines: List[str]) -> List[str]:
 
 
 def format_variable_assignments(lines: List[str]) -> List[str]:
-    """Format variable assignments with aligned = operators"""
+    """Format variable assignments with aligned = operators and storage/memory keywords"""
     assignment_groups = find_assignment_groups(lines)
     result = lines.copy()
 
@@ -569,19 +569,98 @@ def format_variable_assignments(lines: List[str]) -> List[str]:
         if len(group) <= 1:
             continue
 
-        max_var_length = max(len(parts[0]) for line_idx, parts in group)
+        # Separate lines with and without modifiers
+        modifier_lines = []
+        simple_lines = []
 
         for line_idx, parts in group:
-            var_part, value_part = parts
-            padding_needed = max_var_length - len(var_part)
-            padding = " " * padding_needed
+            var_tokens = parts[0].split()
+            if len(var_tokens) >= 3 and var_tokens[1] in [
+                "storage",
+                "memory",
+                "calldata",
+            ]:
+                modifier_lines.append((line_idx, parts))
+            else:
+                simple_lines.append((line_idx, parts))
 
-            original_line = lines[line_idx]
-            indent = original_line[: len(original_line) - len(original_line.lstrip())]
+        # Format modifier lines separately from simple lines
+        if modifier_lines:
+            format_complex_assignments(modifier_lines, lines, result)
 
-            result[line_idx] = f"{indent}{var_part}{padding} = {value_part}"
+        if simple_lines:
+            # Simple alignment for lines without modifiers
+            max_var_length = max(len(parts[0]) for line_idx, parts in simple_lines)
+
+            for line_idx, parts in simple_lines:
+                var_part, value_part = parts
+                padding_needed = max_var_length - len(var_part)
+                padding = " " * padding_needed
+
+                original_line = lines[line_idx]
+                indent = original_line[
+                    : len(original_line) - len(original_line.lstrip())
+                ]
+
+                result[line_idx] = f"{indent}{var_part}{padding} = {value_part}"
 
     return result
+
+
+def format_complex_assignments(group, lines, result):
+    """Format assignments with storage/memory modifiers using three-column alignment"""
+    # Parse each assignment - all should have modifiers now
+    parsed_assignments = []
+    max_type_length = 0
+    max_modifier_length = 0
+    max_var_length = 0
+    max_array_name_length = 0
+
+    for line_idx, parts in group:
+        var_part, value_part = parts
+        var_tokens = var_part.split()
+
+        # All lines in this group should have modifiers
+        type_part = var_tokens[0]
+        modifier = var_tokens[1]
+        var_name = " ".join(var_tokens[2:])
+
+        # Check for array access to find max array name length
+        if "[" in value_part:
+            bracket_pos = value_part.find("[")
+            array_name = value_part[:bracket_pos].strip()
+            max_array_name_length = max(max_array_name_length, len(array_name))
+
+        parsed_assignments.append((line_idx, type_part, modifier, var_name, value_part))
+        max_type_length = max(max_type_length, len(type_part))
+        max_modifier_length = max(max_modifier_length, len(modifier))
+        max_var_length = max(max_var_length, len(var_name))
+
+    # Rebuild with alignment
+    for line_idx, type_part, modifier, var_name, value_part in parsed_assignments:
+        original_line = lines[line_idx]
+        indent = original_line[: len(original_line) - len(original_line.lstrip())]
+
+        # Use three column alignment
+        type_padding = " " * (max_type_length - len(type_part))
+        modifier_padding = " " * (max_modifier_length - len(modifier))
+        var_padding = " " * (max_var_length - len(var_name))
+
+        # Special handling for array access in value
+        if "[" in value_part and (
+            value_part.strip().endswith("]") or value_part.strip().endswith("];")
+        ):
+            bracket_pos = value_part.find("[")
+            array_name = value_part[:bracket_pos].strip()
+            array_index = value_part[bracket_pos:].strip()
+
+            # Add spacing to align array names
+            array_padding = " " * (max_array_name_length - len(array_name))
+            value_part = f"{array_name}{array_padding}{array_index}"
+
+        result[line_idx] = (
+            f"{indent}{type_part}{type_padding} {modifier}{modifier_padding} {var_name}{var_padding} = {value_part}"
+        )
 
 
 def find_assignment_groups(lines: List[str]) -> List[List[Tuple[int, Tuple[str, str]]]]:
@@ -621,10 +700,10 @@ def format_struct_assignments(lines: List[str]) -> List[str]:
     """Format struct field assignments with aligned colons"""
     result = lines.copy()
     i = 0
-    
+
     while i < len(result):
         line = result[i]
-        
+
         # Look for lines that might start a struct initialization
         if "{" in line and "(" in line and not line.strip().startswith("//"):
             # Find the opening brace
@@ -637,63 +716,81 @@ def format_struct_assignments(lines: List[str]) -> List[str]:
                     struct_lines = []
                     struct_start = i
                     j = i
-                    
+
                     # Find all lines until the closing brace
                     brace_count = 0
                     while j < len(result):
                         current_line = result[j]
                         struct_lines.append(j)
-                        
+
                         # Count braces to find the end
                         brace_count += current_line.count("{") - current_line.count("}")
-                        
+
                         if brace_count == 0 and "}" in current_line:
                             break
                         j += 1
-                    
+
                     # Process struct fields
-                    if len(struct_lines) > 2:  # At least opening, one field, and closing
+                    if (
+                        len(struct_lines) > 2
+                    ):  # At least opening, one field, and closing
                         field_data = []
                         max_field_name_length = 0
-                        
+
                         # Parse each field line
                         for line_idx in struct_lines[1:-1]:  # Skip first and last lines
                             field_line = result[line_idx]
                             stripped = field_line.strip()
-                            
+
                             # Skip empty lines and comments
                             if not stripped or stripped.startswith("//"):
                                 continue
-                            
+
                             # Look for field assignments (field: value)
                             if ":" in stripped:
                                 colon_pos = stripped.find(":")
                                 field_name = stripped[:colon_pos].strip()
-                                field_value = stripped[colon_pos + 1:].strip()
-                                
+                                field_value = stripped[colon_pos + 1 :].strip()
+
                                 # Remove trailing comma if present
                                 if field_value.endswith(","):
                                     has_comma = True
                                     field_value = field_value[:-1].strip()
                                 else:
                                     has_comma = False
-                                
-                                field_data.append((line_idx, field_name, field_value, has_comma))
-                                max_field_name_length = max(max_field_name_length, len(field_name))
-                        
+
+                                field_data.append(
+                                    (line_idx, field_name, field_value, has_comma)
+                                )
+                                max_field_name_length = max(
+                                    max_field_name_length, len(field_name)
+                                )
+
                         # Rebuild struct with aligned fields
                         if field_data:
-                            for line_idx, field_name, field_value, has_comma in field_data:
-                                indent = result[line_idx][: len(result[line_idx]) - len(result[line_idx].lstrip())]
-                                padding = " " * (max_field_name_length - len(field_name))
+                            for (
+                                line_idx,
+                                field_name,
+                                field_value,
+                                has_comma,
+                            ) in field_data:
+                                indent = result[line_idx][
+                                    : len(result[line_idx])
+                                    - len(result[line_idx].lstrip())
+                                ]
+                                padding = " " * (
+                                    max_field_name_length - len(field_name)
+                                )
                                 comma = "," if has_comma else ""
-                                result[line_idx] = f"{indent}{field_name}:{padding} {field_value}{comma}"
-                    
+                                result[line_idx] = (
+                                    f"{indent}{field_name}:{padding} {field_value}{comma}"
+                                )
+
                     i = j + 1
                     continue
-        
+
         i += 1
-    
+
     return result
 
 

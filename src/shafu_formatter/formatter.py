@@ -108,6 +108,45 @@ def format_variable_declarations(lines):
     return lines
 
 
+def format_operator_spacing(lines):
+    """Add consistent spacing around operators in expressions."""
+    operators = ['+', '-', '*', '/', '=', '==', '!=', '<=', '>=', '<', '>', '&&', '||']
+    
+    for i, line in enumerate(lines):
+        # Skip lines that are just whitespace or comments
+        if not line.strip() or line.strip().startswith('//'):
+            continue
+            
+        # Skip pragma and import lines
+        if line.strip().startswith('pragma') or line.strip().startswith('import'):
+            continue
+            
+        # Skip contract and function declaration lines
+        if re.match(r'^\s*(contract|function|modifier|event|struct|enum|interface)', line.strip()):
+            continue
+            
+        # Process the line to add spaces around operators
+        processed_line = line
+        
+        # Handle operators in order of length (longer ones first to avoid conflicts)
+        for op in sorted(operators, key=len, reverse=True):
+            # Use word boundaries to avoid matching operators within identifiers
+            if len(op) == 1:
+                # Single character operators
+                pattern = r'([^\s' + re.escape(op) + r'])' + re.escape(op) + r'([^\s' + re.escape(op) + r'])'
+                replacement = r'\1 ' + op + r' \2'
+            else:
+                # Multi-character operators
+                pattern = r'([^\s])' + re.escape(op) + r'([^\s])'
+                replacement = r'\1 ' + op + r' \2'
+            
+            processed_line = re.sub(pattern, replacement, processed_line)
+        
+        lines[i] = processed_line
+    
+    return lines
+
+
 def format_solidity(code):
     lines = code.split('\n')
     
@@ -119,5 +158,8 @@ def format_solidity(code):
     
     # Finally format variable assignments
     lines = format_variable_assignments(lines)
+    
+    # Add operator spacing
+    lines = format_operator_spacing(lines)
     
     return '\n'.join(lines) 

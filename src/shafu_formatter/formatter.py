@@ -1,4 +1,7 @@
 import re
+import subprocess
+import tempfile
+import os
 
 
 def format_function_declarations(lines):
@@ -156,8 +159,51 @@ def format_operator_spacing(lines):
     return lines
 
 
+def convert_uint256_to_uint(lines):
+    """Convert uint256 back to uint for shorter syntax."""
+    for i, line in enumerate(lines):
+        # Replace uint256 with uint, but be careful not to replace in comments
+        # Only replace if it's not in a comment line
+        if not line.strip().startswith('//'):
+            lines[i] = re.sub(r'\buint256\b', 'uint', line)
+    return lines
+
 def format_solidity(code):
+    # First, run forge fmt on the code
+    try:
+        # Create a temporary file with .sol extension
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sol', delete=False) as temp_file:
+            temp_file.write(code)
+            temp_file_path = temp_file.name
+        
+        # Run forge fmt on the temporary file
+        result = subprocess.run(['forge', 'fmt', temp_file_path], 
+                              capture_output=True, text=True, check=True)
+        
+        # Read the formatted code back
+        with open(temp_file_path, 'r') as temp_file:
+            formatted_code = temp_file.read()
+        
+        # Clean up the temporary file
+        os.unlink(temp_file_path)
+        
+        # Use the forge-formatted code as input
+        code = formatted_code
+        
+    except subprocess.CalledProcessError as e:
+        # If forge fmt fails, continue with original code
+        print(f"Warning: forge fmt failed: {e}")
+    except FileNotFoundError:
+        # If forge is not installed, continue with original code
+        print("Warning: forge not found, skipping forge fmt")
+    except Exception as e:
+        # For any other errors, continue with original code
+        print(f"Warning: Error running forge fmt: {e}")
+    
     lines = code.split('\n')
+    
+    # Convert uint256 back to uint for shorter syntax
+    lines = convert_uint256_to_uint(lines)
     
     # Format function declarations first
     lines = format_function_declarations(lines)

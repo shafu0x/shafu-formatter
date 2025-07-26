@@ -380,6 +380,142 @@ def format_constructors(lines: List[str]) -> List[str]:
     return result
 
 
+def format_require_statements(lines: List[str]) -> List[str]:
+    """Format require statements with aligned conditions and error messages"""
+    result = lines.copy()
+    
+    # Find groups of consecutive require statements
+    require_groups = []
+    current_group = []
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("require(") and not line.strip().startswith("//"):
+            current_group.append(i)
+        else:
+            if len(current_group) > 1:
+                require_groups.append(current_group)
+            current_group = []
+    
+    if len(current_group) > 1:
+        require_groups.append(current_group)
+    
+    # Process each group
+    for group in require_groups:
+        # Parse require statements
+        require_data = []
+        max_left_length = 0
+        max_operator_length = 0
+        max_right_length = 0
+        
+        for line_idx in group:
+            line = lines[line_idx]
+            indent = line[: len(line) - len(line.lstrip())]
+            stripped = line.strip()
+            
+            # Extract condition and error from require statement
+            if "require(" in stripped and "," in stripped:
+                # Find the matching parenthesis
+                paren_count = 0
+                condition_end = -1
+                for i, char in enumerate(stripped):
+                    if char == '(':
+                        paren_count += 1
+                    elif char == ')':
+                        paren_count -= 1
+                        if paren_count == 0:
+                            condition_end = i
+                            break
+                
+                if condition_end > 0:
+                    # Extract the full require content
+                    require_content = stripped[8:condition_end]  # Skip "require("
+                    
+                    # Find the last comma that separates condition from error
+                    comma_positions = []
+                    paren_depth = 0
+                    for i, char in enumerate(require_content):
+                        if char == '(':
+                            paren_depth += 1
+                        elif char == ')':
+                            paren_depth -= 1
+                        elif char == ',' and paren_depth == 0:
+                            comma_positions.append(i)
+                    
+                    if comma_positions:
+                        last_comma = comma_positions[-1]
+                        condition = require_content[:last_comma].strip()
+                        error_part = require_content[last_comma + 1:].strip()
+                        
+                        # Parse the condition to find operators
+                        # Common operators in order of precedence (longest first to avoid splitting <=)
+                        operators = ['<=', '>=', '==', '!=', '<', '>', '&&', '||']
+                        operator_found = None
+                        operator_pos = -1
+                        
+                        for op in operators:
+                            if op in condition:
+                                # Find the operator position (not inside parentheses)
+                                paren_depth = 0
+                                for i in range(len(condition) - len(op) + 1):
+                                    substring = condition[i:i+len(op)]
+                                    # Check paren depth at this position
+                                    for j in range(i):
+                                        if condition[j] == '(':
+                                            paren_depth += 1
+                                        elif condition[j] == ')':
+                                            paren_depth -= 1
+                                    
+                                    if substring == op and paren_depth == 0:
+                                        operator_found = op
+                                        operator_pos = i
+                                        break
+                                
+                                if operator_found:
+                                    break
+                        
+                        if operator_found and operator_pos >= 0:
+                            left_part = condition[:operator_pos].strip()
+                            right_part = condition[operator_pos + len(operator_found):].strip()
+                            
+                            require_data.append((line_idx, indent, left_part, operator_found, right_part, error_part))
+                            max_left_length = max(max_left_length, len(left_part))
+                            max_operator_length = max(max_operator_length, len(operator_found))
+                            max_right_length = max(max_right_length, len(right_part))
+                        else:
+                            # No operator found, treat as simple condition
+                            require_data.append((line_idx, indent, condition, "", "", error_part))
+                            max_left_length = max(max_left_length, len(condition))
+        
+        # Calculate the maximum condition length to determine error alignment
+        max_condition_length = 0
+        conditions_list = []
+        
+        for data in require_data:
+            if len(data) == 6:  # Has operator
+                line_idx, indent, left, op, right, error = data
+                left_padding = " " * (max_left_length - len(left))
+                op_padding = " " * (max_operator_length - len(op))
+                
+                # Build condition with alignment
+                if op:
+                    condition_str = f"{left}{left_padding} {op}{op_padding} {right}"
+                else:
+                    condition_str = f"{left}{left_padding}"
+                
+                conditions_list.append((line_idx, indent, condition_str, error))
+                max_condition_length = max(max_condition_length, len(condition_str))
+        
+        # Rebuild require statements with proper error alignment
+        for line_idx, indent, condition_str, error in conditions_list:
+            # Add padding after comma to align errors
+            padding_after_comma = " " * (max_condition_length - len(condition_str))
+            aligned_require = f"{indent}require({condition_str},{padding_after_comma} {error});"
+            result[line_idx] = aligned_require
+    
+    return result
+
+
 def format_variable_assignments(lines: List[str]) -> List[str]:
     """Format variable assignments with aligned = operators"""
     assignment_groups = find_assignment_groups(lines)
@@ -417,6 +553,7 @@ def find_assignment_groups(lines: List[str]) -> List[List[Tuple[int, Tuple[str, 
             and not stripped.startswith("//")
             and "pragma" not in stripped
             and "import" not in stripped
+            and "require(" not in stripped
         ):
             parts = stripped.split("=", 1)
             if len(parts) == 2:
@@ -436,6 +573,18 @@ def find_assignment_groups(lines: List[str]) -> List[List[Tuple[int, Tuple[str, 
     return groups
 
 
+def add_double_space_before_brace(lines: List[str]) -> List[str]:
+    """Add double space before opening brace in function/constructor declarations"""
+    result = []
+    for line in lines:
+        # Match lines that end with ) { and add extra space
+        if line.strip().endswith(") {"):
+            result.append(line[:-2] + "  {")
+        else:
+            result.append(line)
+    return result
+
+
 def format_solidity(code: str) -> str:
     """Main entry point for formatting Solidity code"""
     # Run forge fmt first
@@ -451,7 +600,9 @@ def format_solidity(code: str) -> str:
         format_variable_declarations,
         format_function_declarations,
         format_constructors,
+        format_require_statements,
         format_variable_assignments,
+        add_double_space_before_brace,
     ]
 
     for transform in transformations:

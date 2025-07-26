@@ -12,8 +12,25 @@ dependencies = [
     "tree-sitter>=0.21.3",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [project.scripts]
-shafu = "shafu_formatter.main:main" 
+shafu = "shafu_formatter.main:main"
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C", "N"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space" 

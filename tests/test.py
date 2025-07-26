@@ -12,8 +12,8 @@ from src.shafu_formatter.formatter import format_solidity
 def test_all():
     # Determine the correct paths based on current working directory
     test_dir = Path(__file__).parent
-    before_dir = test_dir / "before"
-    after_dir = test_dir / "after"
+    before_dir = test_dir / "0_before"
+    after_dir = test_dir / "1_after"
     
     passed = 0
     failed = 0

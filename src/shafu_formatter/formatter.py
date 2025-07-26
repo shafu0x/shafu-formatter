@@ -13,8 +13,8 @@ def format_function_declarations(lines):
             visibility = match.group(3)
             rest = match.group(4)
             
-            new_lines.append(f"{indent}{function_sig} ")
-            new_lines.append(f"{indent}    {visibility} ")
+            new_lines.append(f"{indent}{function_sig}")
+            new_lines.append(f"{indent}    {visibility}")
             new_lines.append(f"{indent}{{")
             if rest.strip():
                 new_lines.append(f"{indent}    {rest}")

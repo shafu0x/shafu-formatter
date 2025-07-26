@@ -10,5 +10,9 @@ contract Escrow {
         require(_distributions.length >  0,                 Errors.EMPTY_ARRAY);
         require(_distributions.length <= batchLimit,        Errors.BATCH_LIMIT_EXCEEDED);
         // do things
+
+        require(distribution.exists,                                      Errors.INVALID_DISTRIBUTION_ID);
+        require(distribution.status    == DistributionStatus.Distributed, Errors.ALREADY_CLAIMED);
+        require(distribution.recipient == msg.sender,                     Errors.INVALID_RECIPIENT);
     }
 }

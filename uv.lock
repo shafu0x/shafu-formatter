@@ -278,7 +278,7 @@ wheels = [
 [[package]]
 name = "shafu-formatter"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "tree-sitter" },
     { name = "tree-sitter-solidity" },

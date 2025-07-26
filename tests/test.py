@@ -1,10 +1,19 @@
 from pathlib import Path
-from formatter import format_solidity
+import sys
+import os
+
+# Add the project root to the path so we can import from src
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.shafu_formatter.formatter import format_solidity
 
 
 def test_all():
-    before_dir = Path("tests/before")
-    after_dir = Path("tests/after")
+    # Determine the correct paths based on current working directory
+    test_dir = Path(__file__).parent
+    before_dir = test_dir / "before"
+    after_dir = test_dir / "after"
     
     passed = 0
     failed = 0

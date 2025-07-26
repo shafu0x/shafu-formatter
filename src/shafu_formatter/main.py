@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from formatter import format_solidity
+from .formatter import format_solidity
 
 
 def main():

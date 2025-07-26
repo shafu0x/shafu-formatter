@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "shafu-formatter"
 version = "0.1.0"
@@ -8,5 +12,8 @@ dependencies = [
     "tree-sitter>=0.21.3",
 ]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project.scripts]
-shafu = "main:main" 
+shafu = "shafu_formatter.main:main" 

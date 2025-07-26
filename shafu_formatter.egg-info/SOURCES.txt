@@ -1,7 +1,0 @@
-formatter.py
-pyproject.toml
-shafu_formatter.egg-info/PKG-INFO
-shafu_formatter.egg-info/SOURCES.txt
-shafu_formatter.egg-info/dependency_links.txt
-shafu_formatter.egg-info/entry_points.txt
-shafu_formatter.egg-info/top_level.txt

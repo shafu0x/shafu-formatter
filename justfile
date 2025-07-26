@@ -6,4 +6,4 @@ install:
     uv pip install -e .
 
 test:
-    uv run python test.py
+    uv run python tests/test.py

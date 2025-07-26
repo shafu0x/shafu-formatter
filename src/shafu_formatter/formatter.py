@@ -1,281 +1,476 @@
-import re
 import subprocess
 import tempfile
 import os
+import re
+from typing import List, Tuple, Callable, Optional
+
+# Precompiled regex patterns
+IMPORT_PATTERN = re.compile(r"^(\s*import\s+.+?)\s+from\s+(.+)$")
+VAR_PATTERN = re.compile(
+    r"^\s*(uint\d*|address|bool|bytes\d*|string)\s+(public|private|internal)\s+"
+)
+SINGLE_LINE_FUNC_PATTERN = re.compile(
+    r"^(\s*function\s+\w+)\(([^)]*)\)\s*(.+?)\s*\{?\s*$"
+)
+FUNC_SIG_PATTERN = re.compile(r"^(\s*function\s+\w+)\(([^)]*)\)\s*$")
+CONSTRUCTOR_PATTERN = re.compile(r"^(\s*constructor)\(([^)]*)\)\s*(.*)$")
 
 
-def format_imports(lines):
-    """Align import statements so 'from' keywords line up."""
-    import_lines = []
-    import_indices = []
-    
-    # Pattern to match import statements
-    import_pattern = r"^(\s*)(import\s+\{[^}]+\})\s+(from\s+.+)$"
-    
-    for i, line in enumerate(lines):
-        match = re.match(import_pattern, line)
-        if match:
-            indent = match.group(1)
-            import_part = match.group(2)  # "import {Name}"
-            from_part = match.group(3)    # "from ..."
-            
-            import_lines.append({
-                "index": i,
-                "indent": indent,
-                "import_part": import_part,
-                "from_part": from_part
-            })
-            import_indices.append(i)
-    
-    # Find the longest import part and align accordingly
-    if import_lines:
-        max_length = max(len(imp["import_part"]) for imp in import_lines)
-        
-        for imp in import_lines:
-            spaces_needed = max_length - len(imp["import_part"]) + 1  # +1 for separation
-            padding = " " * spaces_needed
-            lines[imp["index"]] = f"{imp['indent']}{imp['import_part']}{padding}{imp['from_part']}"
-    
-    return lines
-
-
-def format_function_declarations(lines):
-    new_lines = []
-    # Updated pattern to capture any modifiers after visibility
-    function_pattern = r"^(\s*)(function\s+\w+\([^)]*\))\s+(public|private|internal|external)(\s+\w+)*\s*\{(.*)$"
-
-    for line in lines:
-        match = re.match(function_pattern, line)
-        if match:
-            indent = match.group(1)
-            function_sig = match.group(2)
-            visibility = match.group(3)
-            modifiers = match.group(4)  # This will capture any additional modifiers
-            rest = match.group(5)
-
-            new_lines.append(f"{indent}{function_sig}")
-            new_lines.append(f"{indent}    {visibility}")
-
-            # Add any additional modifiers on separate lines
-            if modifiers:
-                modifier_list = modifiers.strip().split()
-                for modifier in modifier_list:
-                    new_lines.append(f"{indent}    {modifier}")
-
-            new_lines.append(f"{indent}{{")
-            if rest.strip():
-                new_lines.append(f"{indent}    {rest}")
-        else:
-            new_lines.append(line)
-
-    return new_lines
-
-
-def format_variable_assignments(lines):
-    # Pattern to match variable assignments with = operator
-    assignment_pattern = r"^(\s*)(\w+\s+\w+)\s*=\s*(.+)$"
-
-    # Find all assignment lines and their positions
-    assignments = []
-    for i, line in enumerate(lines):
-        match = re.match(assignment_pattern, line)
-        if match:
-            indent = match.group(1)
-            variable_declaration = match.group(2)
-            value = match.group(3)
-            assignments.append(
-                {
-                    "index": i,
-                    "indent": indent,
-                    "variable_declaration": variable_declaration,
-                    "value": value,
-                }
-            )
-
-    # Find the longest variable declaration in this block
-    if assignments:
-        max_length = max(
-            len(assignment["variable_declaration"]) for assignment in assignments
-        )
-
-        # Format each assignment with aligned = operators
-        for assignment in assignments:
-            spaces_needed = max_length - len(assignment["variable_declaration"])
-            padding = " " * spaces_needed
-            lines[assignment["index"]] = (
-                f"{assignment['indent']}{assignment['variable_declaration']}{padding} = {assignment['value']}"
-            )
-
-    return lines
-
-
-def find_variable_declaration_blocks(lines):
-    pattern = r"^(\s*)(uint\d*|address|bool|bytes\d*|string)(\s+)(public|private|internal|external)(.*)$"
-    declaration_blocks = []
-    current_block = []
-
-    for i, line in enumerate(lines):
-        match = re.match(pattern, line)
-        if match:
-            declaration = {
-                "index": i,
-                "indent": match.group(1),
-                "type": match.group(2),
-                "visibility": match.group(4),
-                "rest": match.group(5),
-            }
-            current_block.append(declaration)
-        else:
-            if current_block:
-                declaration_blocks.append(current_block)
-                current_block = []
-
-    # Don't forget the last block if file ends with declarations
-    if current_block:
-        declaration_blocks.append(current_block)
-
-    return declaration_blocks
-
-
-def format_variable_declaration_block(lines, block):
-    if not block:
-        return
-
-    # Find longest type in this block and align the visibility keyword
-    max_length = max(len(d["type"]) for d in block)
-    target_width = max_length + 1  # longest type + 1 space
-
-    for d in block:
-        spaces_needed = target_width - len(d["type"])
-        padding = " " * spaces_needed
-        lines[d["index"]] = (
-            f"{d['indent']}{d['type']}{padding}{d['visibility']}{d['rest']}"
-        )
-
-
-def format_variable_declarations(lines):
-    declaration_blocks = find_variable_declaration_blocks(lines)
-
-    # Process each block separately
-    for block in declaration_blocks:
-        format_variable_declaration_block(lines, block)
-
-    return lines
-
-
-def format_operator_spacing(lines):
-    """Add consistent spacing around operators in expressions."""
-    operators = ["+", "-", "*", "/", "=", "==", "!=", "<=", ">=", "<", ">", "&&", "||"]
-
-    for i, line in enumerate(lines):
-        # Skip lines that are just whitespace or comments
-        if not line.strip() or line.strip().startswith("//"):
-            continue
-
-        # Skip pragma and import lines
-        if line.strip().startswith("pragma") or line.strip().startswith("import"):
-            continue
-
-        # Skip contract and function declaration lines
-        if re.match(
-            r"^\s*(contract|function|modifier|event|struct|enum|interface)",
-            line.strip(),
-        ):
-            continue
-
-        # Process the line to add spaces around operators
-        processed_line = line
-
-        # Handle operators in order of length (longer ones first to avoid conflicts)
-        for op in sorted(operators, key=len, reverse=True):
-            # Use word boundaries to avoid matching operators within identifiers
-            if len(op) == 1:
-                # Single character operators
-                pattern = (
-                    r"([^\s"
-                    + re.escape(op)
-                    + r"])"
-                    + re.escape(op)
-                    + r"([^\s"
-                    + re.escape(op)
-                    + r"])"
-                )
-                replacement = r"\1 " + op + r" \2"
-            else:
-                # Multi-character operators
-                pattern = r"([^\s])" + re.escape(op) + r"([^\s])"
-                replacement = r"\1 " + op + r" \2"
-
-            processed_line = re.sub(pattern, replacement, processed_line)
-
-        lines[i] = processed_line
-
-    return lines
-
-
-def convert_uint256_to_uint(lines):
-    """Convert uint256 back to uint for shorter syntax."""
-    for i, line in enumerate(lines):
-        # Replace uint256 with uint, but be careful not to replace in comments
-        # Only replace if it's not in a comment line
-        if not line.strip().startswith("//"):
-            lines[i] = re.sub(r"\buint256\b", "uint", line)
-    return lines
-
-
-def format_solidity(code):
-    # First, run forge fmt on the code
+def run_forge_fmt(code: str) -> str:
+    """Run forge fmt as a foundation, return original code on failure"""
     try:
-        # Create a temporary file with .sol extension
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".sol", delete=False
         ) as temp_file:
             temp_file.write(code)
             temp_file_path = temp_file.name
 
-        # Run forge fmt on the temporary file
-        result = subprocess.run(
-            ["forge", "fmt", temp_file_path], capture_output=True, text=True, check=True
+        subprocess.run(
+            ["forge", "fmt", temp_file_path],
+            capture_output=True,
+            text=True,
+            check=True,
         )
 
-        # Read the formatted code back
         with open(temp_file_path, "r") as temp_file:
             formatted_code = temp_file.read()
 
-        # Clean up the temporary file
         os.unlink(temp_file_path)
+        return formatted_code
 
-        # Use the forge-formatted code as input
-        code = formatted_code
+    except (subprocess.CalledProcessError, FileNotFoundError, Exception):
+        return code
 
-    except subprocess.CalledProcessError as e:
-        # If forge fmt fails, continue with original code
-        print(f"Warning: forge fmt failed: {e}")
-    except FileNotFoundError:
-        # If forge is not installed, continue with original code
-        print("Warning: forge not found, skipping forge fmt")
-    except Exception as e:
-        # For any other errors, continue with original code
-        print(f"Warning: Error running forge fmt: {e}")
 
-    lines = code.split("\n")
+def preserve_trailing_newline(original: str, formatted: str) -> str:
+    """Preserve original trailing newline behavior"""
+    if not original.endswith("\n") and formatted.endswith("\n"):
+        return formatted.rstrip("\n")
+    elif original.endswith("\n") and not formatted.endswith("\n"):
+        return formatted + "\n"
+    return formatted
 
-    # Convert uint256 back to uint for shorter syntax
-    lines = convert_uint256_to_uint(lines)
 
-    # Format function declarations first
-    lines = format_function_declarations(lines)
+def find_consecutive_matching_lines(
+    lines: List[str],
+    pattern: re.Pattern,
+    filter_func: Optional[Callable[[str], bool]] = None,
+) -> List[List[int]]:
+    """Find groups of consecutive lines matching a pattern"""
+    matching_lines = []
+    for line_idx, line in enumerate(lines):
+        if pattern.match(line) and (filter_func is None or filter_func(line)):
+            matching_lines.append(line_idx)
 
-    # Then format variable declarations
-    lines = format_variable_declarations(lines)
+    # Group consecutive lines
+    groups = []
+    current_group = []
 
-    # Finally format variable assignments
-    lines = format_variable_assignments(lines)
+    for line_idx in matching_lines:
+        if not current_group or line_idx == current_group[-1] + 1:
+            current_group.append(line_idx)
+        else:
+            if len(current_group) > 1:
+                groups.append(current_group)
+            current_group = [line_idx]
 
-    # Add operator spacing
-    lines = format_operator_spacing(lines)
+    if len(current_group) > 1:
+        groups.append(current_group)
 
-    # Format imports
-    lines = format_imports(lines)
+    return groups
 
-    return "\n".join(lines)
+
+def align_by_capture_groups(
+    lines: List[str],
+    pattern: re.Pattern,
+    format_func: Callable[[str, re.Match, int], str],
+    filter_func: Optional[Callable[[str], bool]] = None,
+) -> List[str]:
+    """Generic helper to align consecutive lines by capture groups"""
+    result = lines.copy()
+    groups = find_consecutive_matching_lines(lines, pattern, filter_func)
+
+    for group in groups:
+        if len(group) <= 1:
+            continue
+
+        # Calculate max length for alignment
+        max_length = 0
+        group_matches = []
+
+        for line_idx in group:
+            line = lines[line_idx]
+            match = pattern.match(line)
+            if match:
+                group_matches.append((line_idx, match))
+                # This will be overridden by specific format_func logic
+                max_length = max(max_length, len(match.group(1)))
+
+        # Apply formatting
+        for line_idx, match in group_matches:
+            result[line_idx] = format_func(lines[line_idx], match, max_length)
+
+    return result
+
+
+def convert_uint256_to_uint(lines: List[str]) -> List[str]:
+    """Convert uint256 to uint for shorter syntax"""
+    return [
+        line.replace("uint256", "uint") if not line.strip().startswith("//") else line
+        for line in lines
+    ]
+
+
+def format_import_statements(lines: List[str]) -> List[str]:
+    """Format and align import statements"""
+
+    def format_import(line: str, match: re.Match, max_length: int) -> str:
+        import_part = match.group(1).strip()
+        from_part = match.group(2).strip()
+        indent = line[: len(line) - len(line.lstrip())]
+
+        padding_needed = max_length - len(import_part)
+        padding = " " * (padding_needed + 1)  # +1 for separation
+
+        return f"{indent}{import_part}{padding}from {from_part}"
+
+    return align_by_capture_groups(lines, IMPORT_PATTERN, format_import)
+
+
+def format_variable_declarations(lines: List[str]) -> List[str]:
+    """Format and align variable declarations"""
+
+    def format_var(line: str, match: re.Match, max_length: int) -> str:
+        type_name = match.group(1)
+        padding_needed = max_length - len(type_name)
+        padding = " " * padding_needed
+
+        return VAR_PATTERN.sub(
+            lambda m: f"{line[: m.start(1)]}{m.group(1)}{padding} {m.group(2)} ",
+            line,
+            count=1,
+        )
+
+    filter_func = lambda line: not line.strip().startswith("//")
+    return align_by_capture_groups(lines, VAR_PATTERN, format_var, filter_func)
+
+
+def format_function_declarations(lines: List[str]) -> List[str]:
+    """Format function declarations with proper multiline style"""
+    result = lines.copy()
+    i = 0
+
+    while i < len(result):
+        line = result[i]
+
+        # Pattern 1: Single-line function with visibility
+        match = SINGLE_LINE_FUNC_PATTERN.match(line)
+        if match and any(
+            vis in match.group(3)
+            for vis in ["external", "public", "private", "internal"]
+        ):
+            new_lines = convert_function_to_multiline(line, match)
+            result[i : i + 1] = new_lines
+            i += len(new_lines)
+            continue
+
+        # Pattern 2: Function signature with parameters on same line
+        match = FUNC_SIG_PATTERN.match(line)
+        if match:
+            params_str = match.group(2).strip()
+            params = (
+                [p.strip() for p in params_str.split(",") if p.strip()]
+                if params_str
+                else []
+            )
+            if len(params) > 2:
+                new_lines = reformat_function_parameters(line, match)
+                result[i : i + 1] = new_lines
+                i += len(new_lines)
+                continue
+
+        i += 1
+
+    return result
+
+
+def convert_function_to_multiline(line: str, match: re.Match) -> List[str]:
+    """Convert single-line function to proper multiline format"""
+    func_name_part = match.group(1)
+    params_str = match.group(2).strip()
+    after_params = match.group(3).strip()
+
+    if after_params.endswith("{"):
+        after_params = after_params[:-1].strip()
+
+    indent = line[: len(line) - len(line.lstrip())]
+    new_lines = []
+
+    params = (
+        [p.strip() for p in params_str.split(",") if p.strip()] if params_str else []
+    )
+
+    if len(params) > 2:
+        new_lines.append(f"{func_name_part}(")
+        for i, param in enumerate(params):
+            if i == len(params) - 1:
+                new_lines.append(f"{indent}    {param}")
+            else:
+                new_lines.append(f"{indent}    {param},")
+        new_lines.append(f"{indent})")
+    else:
+        new_lines.append(f"{func_name_part}({params_str})")
+
+    if after_params:
+        parts = after_params.split()
+        for part in parts:
+            new_lines.append(f"{indent}    {part}")
+
+    new_lines.append(f"{indent}{{")
+    return new_lines
+
+
+def reformat_function_parameters(line: str, match: re.Match) -> List[str]:
+    """Reformat function parameters to be on separate lines when >2 params"""
+    func_name_part = match.group(1)
+    params_str = match.group(2).strip()
+
+    params = [p.strip() for p in params_str.split(",") if p.strip()]
+    indent = line[: len(line) - len(line.lstrip())]
+
+    new_lines = [f"{func_name_part}("]
+
+    for i, param in enumerate(params):
+        if i == len(params) - 1:
+            new_lines.append(f"{indent}    {param}")
+        else:
+            new_lines.append(f"{indent}    {param},")
+
+    new_lines.append(f"{indent})")
+    return new_lines
+
+
+def format_constructors(lines: List[str]) -> List[str]:
+    """Format constructor declarations with aligned parameters"""
+    result = lines.copy()
+    i = 0
+
+    while i < len(result):
+        line = result[i]
+
+        # Check if this is a constructor line
+        if "constructor(" in line and not line.strip().startswith("//"):
+            # Find the constructor declaration and its parameters
+            constructor_start = i
+            constructor_lines = []
+
+            # Collect all lines of the constructor declaration
+            j = i
+            while j < len(result):
+                constructor_lines.append(result[j])
+                # Check if this line ends the parameter list
+                if ")" in result[j]:
+                    break
+                j += 1
+
+            # Only process if we have multiple parameter lines
+            if len(constructor_lines) > 2:  # constructor( + params + )
+                # Parse the last line to separate ) and {
+                last_line = constructor_lines[-1]
+                last_line_stripped = last_line.strip()
+                indent = constructor_lines[0][
+                    : len(constructor_lines[0]) - len(constructor_lines[0].lstrip())
+                ]
+
+                # Check if ) and { are on the same line
+                extra_after_paren = ""
+                if ") {" in last_line_stripped:
+                    extra_after_paren = " {"
+                elif ")" in last_line_stripped and "{" in last_line_stripped:
+                    # Find what comes after )
+                    paren_idx = last_line_stripped.index(")")
+                    extra_after_paren = last_line_stripped[paren_idx + 1 :].rstrip()
+
+                # Extract parameters
+                params = []
+                for line_idx in range(1, len(constructor_lines) - 1):
+                    param_line = constructor_lines[line_idx].strip()
+                    if param_line.endswith(","):
+                        param_line = param_line[:-1]
+                    params.append(param_line)
+
+                # Add the last parameter if it's before the closing )
+                if len(constructor_lines) > 1:
+                    last_param_line = constructor_lines[-1].strip()
+                    if ")" in last_param_line:
+                        # Extract parameter before )
+                        param_part = last_param_line[
+                            : last_param_line.index(")")
+                        ].strip()
+                        if param_part and param_part != "":
+                            if param_part.endswith(","):
+                                param_part = param_part[:-1]
+                            params.append(param_part)
+
+                # Find max type length for alignment including memory/storage/calldata
+                max_type_with_modifier_length = 0
+                param_parts = []
+
+                for param in params:
+                    if not param:  # Skip empty params
+                        continue
+                    # Split parameter into type and name parts
+                    parts = param.split()
+                    if len(parts) >= 2:
+                        # Handle array types like "address[] memory"
+                        if (
+                            "memory" in parts
+                            or "storage" in parts
+                            or "calldata" in parts
+                        ):
+                            type_part = " ".join(parts[:-2])
+                            memory_part = parts[-2]
+                            name_part = parts[-1]
+                            param_parts.append((type_part, memory_part, name_part))
+                            # Calculate length including memory/storage/calldata
+                            full_type_length = (
+                                len(type_part) + 1 + len(memory_part)
+                            )  # +1 for space
+                            max_type_with_modifier_length = max(
+                                max_type_with_modifier_length, full_type_length
+                            )
+                        else:
+                            type_part = parts[0]
+                            # Handle uint256 -> uint conversion
+                            if type_part == "uint256":
+                                type_part = "uint"
+                            name_part = " ".join(parts[1:])
+                            param_parts.append((type_part, None, name_part))
+                            max_type_with_modifier_length = max(
+                                max_type_with_modifier_length, len(type_part)
+                            )
+
+                # Rebuild constructor with aligned parameters
+                new_lines = [constructor_lines[0]]
+
+                for idx, (type_part, memory_part, name_part) in enumerate(param_parts):
+                    if memory_part:
+                        # For params with memory/storage/calldata
+                        current_length = (
+                            len(type_part) + 1 + len(memory_part)
+                        )  # +1 for space
+                        padding_after_type = " " * (
+                            max_type_with_modifier_length - current_length + 1
+                        )
+                        aligned_param = (
+                            f"{type_part} {memory_part}{padding_after_type}{name_part}"
+                        )
+                    else:
+                        # For simple type params
+                        padding_after_type = " " * (
+                            max_type_with_modifier_length - len(type_part) + 1
+                        )
+                        aligned_param = f"{type_part}{padding_after_type}{name_part}"
+
+                    if idx < len(param_parts) - 1:
+                        new_lines.append(f"{indent}    {aligned_param},")
+                    else:
+                        new_lines.append(f"{indent}    {aligned_param}")
+
+                # Add closing parenthesis with double space before {
+                if extra_after_paren == " {":
+                    extra_after_paren = "  {"
+                new_lines.append(f"{indent}){extra_after_paren}")
+
+                # Replace the old lines with new ones
+                result[
+                    constructor_start : constructor_start + len(constructor_lines)
+                ] = new_lines
+                i = constructor_start + len(new_lines)
+                continue
+
+        i += 1
+
+    return result
+
+
+def format_variable_assignments(lines: List[str]) -> List[str]:
+    """Format variable assignments with aligned = operators"""
+    assignment_groups = find_assignment_groups(lines)
+    result = lines.copy()
+
+    for group in assignment_groups:
+        if len(group) <= 1:
+            continue
+
+        max_var_length = max(len(parts[0]) for line_idx, parts in group)
+
+        for line_idx, parts in group:
+            var_part, value_part = parts
+            padding_needed = max_var_length - len(var_part)
+            padding = " " * padding_needed
+
+            original_line = lines[line_idx]
+            indent = original_line[: len(original_line) - len(original_line.lstrip())]
+
+            result[line_idx] = f"{indent}{var_part}{padding} = {value_part}"
+
+    return result
+
+
+def find_assignment_groups(lines: List[str]) -> List[List[Tuple[int, Tuple[str, str]]]]:
+    """Find consecutive groups of assignment statements"""
+    groups = []
+    current_group = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        if (
+            "=" in stripped
+            and not stripped.startswith("//")
+            and "pragma" not in stripped
+            and "import" not in stripped
+        ):
+            parts = stripped.split("=", 1)
+            if len(parts) == 2:
+                var_part = parts[0].strip()
+                value_part = parts[1].strip()
+                if not any(op in var_part for op in ["==", "!=", "<=", ">="]):
+                    current_group.append((i, (var_part, value_part)))
+                    continue
+
+        if current_group:
+            groups.append(current_group)
+            current_group = []
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
+def format_solidity(code: str) -> str:
+    """Main entry point for formatting Solidity code"""
+    # Run forge fmt first
+    formatted_code = run_forge_fmt(code)
+
+    # Convert to lines for processing
+    lines = formatted_code.split("\n")
+
+    # Apply formatting pipeline
+    transformations = [
+        convert_uint256_to_uint,
+        format_import_statements,
+        format_variable_declarations,
+        format_function_declarations,
+        format_constructors,
+        format_variable_assignments,
+    ]
+
+    for transform in transformations:
+        lines = transform(lines)
+
+    # Convert back to string and preserve trailing newlines
+    result = "\n".join(lines)
+    return preserve_trailing_newline(code, result)

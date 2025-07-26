@@ -255,25 +255,34 @@ class SolidityASTFormatter:
         for line_idx, line in enumerate(self.context.lines):
             stripped = line.strip()
             
-            # Look for single-line function patterns
-            if (stripped.startswith('function') and '(' in stripped and ')' in stripped and 
-                (' external ' in stripped or ' public ' in stripped or ' private ' in stripped or ' internal ' in stripped) and
-                stripped.endswith('{')):
-                
+            # Look for function patterns (either single-line or multiline)
+            if stripped.startswith('function') and '(' in stripped and ')' in stripped:
                 self._convert_function_to_multiline(line_idx)
     
     def _convert_function_to_multiline(self, line_idx: int) -> None:
-        """Convert a single-line function declaration to multi-line format"""
+        """Convert a function declaration to proper multi-line format with parameter formatting"""
         line = self.context.lines[line_idx]
         stripped = line.strip()
         indent = line[:len(line) - len(stripped)]
         
+        
+        # Since forge fmt may have already split the function into multiple lines,
+        # we need to handle both single-line and multi-line function declarations
+        
+        # If this is just the function signature line (after forge fmt), 
+        # we need to reformat just the parameters part
+        if stripped.startswith('function') and '(' in stripped and ')' in stripped and not any(vis in stripped for vis in ['external', 'public', 'private', 'internal']):
+            # This is just the function signature line
+            func_name_params = self._format_function_parameters(stripped, indent)
+            
+            # Replace just this line with the formatted parameters
+            self.context.lines[line_idx:line_idx+1] = func_name_params
+            return
+        
+        # Original logic for single-line functions (if forge fmt didn't run)
         # Remove trailing '{'
         if stripped.endswith('{'):
             stripped = stripped[:-1].strip()
-        
-        # Parse the function declaration
-        # Pattern: function name(params) visibility [modifiers]
         
         # Find the function signature part (everything up to first visibility keyword)
         visibilities = ['external', 'public', 'private', 'internal']
@@ -308,9 +317,12 @@ class SolidityASTFormatter:
         visibility = parts[0]
         modifiers = parts[1:] if len(parts) > 1 else []
         
+        # Parse function signature to extract name and parameters
+        func_name_params = self._format_function_parameters(func_signature, indent)
+        
         # Build multi-line format
         new_lines = []
-        new_lines.append(f"{indent}{func_signature}")
+        new_lines.extend(func_name_params)
         new_lines.append(f"{indent}    {visibility}")
         
         # Add modifiers on separate lines
@@ -321,6 +333,57 @@ class SolidityASTFormatter:
         
         # Replace the original line with multiple lines
         self.context.lines[line_idx:line_idx+1] = new_lines
+    
+    def _format_function_parameters(self, func_signature: str, indent: str) -> list[str]:
+        """Format function parameters, putting each on a new line if more than 2 parameters"""
+        import re
+        
+        # Extract function name and parameters
+        match = re.match(r'function\s+(\w+)\s*\((.*?)\)\s*(returns\s*\([^)]*\))?', func_signature)
+        if not match:
+            # Fallback: return original signature as single line
+            return [f"{indent}{func_signature}"]
+        
+        func_name = match.group(1)
+        params_str = match.group(2).strip()
+        returns_part = match.group(3) or ""
+        
+        # Count parameters by splitting on commas (but be careful about nested parentheses)
+        if not params_str:
+            param_count = 0
+            params = []
+        else:
+            # Simple parameter parsing - split by comma and clean up
+            params = [p.strip() for p in params_str.split(',') if p.strip()]
+            param_count = len(params)
+        
+        # If 2 or fewer parameters, keep on single line
+        if param_count <= 2:
+            if returns_part:
+                return [f"{indent}function {func_name}({params_str}) {returns_part}"]
+            else:
+                return [f"{indent}function {func_name}({params_str})"]
+        
+        # More than 2 parameters: format each parameter on its own line
+        result = []
+        result.append(f"{indent}function {func_name}(")
+        
+        for i, param in enumerate(params):
+            if i == len(params) - 1:
+                # Last parameter - no comma
+                result.append(f"{indent}    {param}")
+            else:
+                # Add comma for all but last parameter
+                result.append(f"{indent}    {param},")
+        
+        # Close parameters and add returns if present
+        if returns_part:
+            result.append(f"{indent}) ")
+            result.append(f"{indent}    {returns_part}")
+        else:
+            result.append(f"{indent})")
+        
+        return result
     
     def _format_variable_assignments(self) -> None:
         """Format variable assignments with aligned = operators"""

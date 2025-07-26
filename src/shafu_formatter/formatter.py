@@ -312,8 +312,9 @@ def format_constructors(lines: List[str]) -> List[str]:
                                 param_part = param_part[:-1]
                             params.append(param_part)
 
-                # Find max type length for alignment including memory/storage/calldata
-                max_type_with_modifier_length = 0
+                # Find max lengths for three-column alignment
+                max_type_length = 0
+                max_modifier_length = 0
                 param_parts = []
 
                 for param in params:
@@ -332,13 +333,8 @@ def format_constructors(lines: List[str]) -> List[str]:
                             memory_part = parts[-2]
                             name_part = parts[-1]
                             param_parts.append((type_part, memory_part, name_part))
-                            # Calculate length including memory/storage/calldata
-                            full_type_length = (
-                                len(type_part) + 1 + len(memory_part)
-                            )  # +1 for space
-                            max_type_with_modifier_length = max(
-                                max_type_with_modifier_length, full_type_length
-                            )
+                            max_type_length = max(max_type_length, len(type_part))
+                            max_modifier_length = max(max_modifier_length, len(memory_part))
                         else:
                             type_part = parts[0]
                             # Handle uint256 -> uint conversion
@@ -346,9 +342,7 @@ def format_constructors(lines: List[str]) -> List[str]:
                                 type_part = "uint"
                             name_part = " ".join(parts[1:])
                             param_parts.append((type_part, None, name_part))
-                            max_type_with_modifier_length = max(
-                                max_type_with_modifier_length, len(type_part)
-                            )
+                            max_type_length = max(max_type_length, len(type_part))
 
                 # Rebuild constructor with aligned parameters
                 new_lines = [constructor_lines[0]]
@@ -356,21 +350,13 @@ def format_constructors(lines: List[str]) -> List[str]:
                 for idx, (type_part, memory_part, name_part) in enumerate(param_parts):
                     if memory_part:
                         # For params with memory/storage/calldata
-                        current_length = (
-                            len(type_part) + 1 + len(memory_part)
-                        )  # +1 for space
-                        padding_after_type = " " * (
-                            max_type_with_modifier_length - current_length + 1
-                        )
-                        aligned_param = (
-                            f"{type_part} {memory_part}{padding_after_type}{name_part}"
-                        )
+                        type_padding = " " * (max_type_length - len(type_part) + 1)
+                        modifier_padding = " " * (max_modifier_length - len(memory_part) + 1)
+                        aligned_param = f"{type_part}{type_padding}{memory_part}{modifier_padding}{name_part}"
                     else:
-                        # For simple type params
-                        padding_after_type = " " * (
-                            max_type_with_modifier_length - len(type_part) + 1
-                        )
-                        aligned_param = f"{type_part}{padding_after_type}{name_part}"
+                        # For simple type params - they need extra padding to account for missing modifier
+                        type_padding = " " * (max_type_length - len(type_part) + max_modifier_length + 2)
+                        aligned_param = f"{type_part}{type_padding}{name_part}"
 
                     if idx < len(param_parts) - 1:
                         new_lines.append(f"{indent}    {aligned_param},")

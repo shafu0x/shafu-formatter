@@ -3,7 +3,8 @@ import re
 
 def format_function_declarations(lines):
     new_lines = []
-    function_pattern = r'^(\s*)(function\s+\w+\([^)]*\))\s+(public|private|internal|external)\s*\{(.*)$'
+    # Updated pattern to capture any modifiers after visibility
+    function_pattern = r'^(\s*)(function\s+\w+\([^)]*\))\s+(public|private|internal|external)(\s+\w+)*\s*\{(.*)$'
     
     for line in lines:
         match = re.match(function_pattern, line)
@@ -11,10 +12,18 @@ def format_function_declarations(lines):
             indent = match.group(1)
             function_sig = match.group(2)
             visibility = match.group(3)
-            rest = match.group(4)
+            modifiers = match.group(4)  # This will capture any additional modifiers
+            rest = match.group(5)
             
             new_lines.append(f"{indent}{function_sig}")
             new_lines.append(f"{indent}    {visibility}")
+            
+            # Add any additional modifiers on separate lines
+            if modifiers:
+                modifier_list = modifiers.strip().split()
+                for modifier in modifier_list:
+                    new_lines.append(f"{indent}    {modifier}")
+            
             new_lines.append(f"{indent}{{")
             if rest.strip():
                 new_lines.append(f"{indent}    {rest}")

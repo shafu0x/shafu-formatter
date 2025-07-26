@@ -13,6 +13,7 @@ SINGLE_LINE_FUNC_PATTERN = re.compile(
     r"^(\s*function\s+\w+)\(([^)]*)\)\s*(.+?)\s*\{?\s*$"
 )
 FUNC_SIG_PATTERN = re.compile(r"^(\s*function\s+\w+)\(([^)]*)\)\s*$")
+CONSTRUCTOR_PATTERN = re.compile(r"^(\s*constructor)\(([^)]*)\)\s*(.*)$")
 
 
 def run_forge_fmt(code: str) -> str:
@@ -249,6 +250,150 @@ def reformat_function_parameters(line: str, match: re.Match) -> List[str]:
     return new_lines
 
 
+def format_constructors(lines: List[str]) -> List[str]:
+    """Format constructor declarations with aligned parameters"""
+    result = lines.copy()
+    i = 0
+
+    while i < len(result):
+        line = result[i]
+
+        # Check if this is a constructor line
+        if "constructor(" in line and not line.strip().startswith("//"):
+            # Find the constructor declaration and its parameters
+            constructor_start = i
+            constructor_lines = []
+
+            # Collect all lines of the constructor declaration
+            j = i
+            while j < len(result):
+                constructor_lines.append(result[j])
+                # Check if this line ends the parameter list
+                if ")" in result[j]:
+                    break
+                j += 1
+
+            # Only process if we have multiple parameter lines
+            if len(constructor_lines) > 2:  # constructor( + params + )
+                # Parse the last line to separate ) and {
+                last_line = constructor_lines[-1]
+                last_line_stripped = last_line.strip()
+                indent = constructor_lines[0][
+                    : len(constructor_lines[0]) - len(constructor_lines[0].lstrip())
+                ]
+
+                # Check if ) and { are on the same line
+                extra_after_paren = ""
+                if ") {" in last_line_stripped:
+                    extra_after_paren = " {"
+                elif ")" in last_line_stripped and "{" in last_line_stripped:
+                    # Find what comes after )
+                    paren_idx = last_line_stripped.index(")")
+                    extra_after_paren = last_line_stripped[paren_idx + 1 :].rstrip()
+
+                # Extract parameters
+                params = []
+                for line_idx in range(1, len(constructor_lines) - 1):
+                    param_line = constructor_lines[line_idx].strip()
+                    if param_line.endswith(","):
+                        param_line = param_line[:-1]
+                    params.append(param_line)
+
+                # Add the last parameter if it's before the closing )
+                if len(constructor_lines) > 1:
+                    last_param_line = constructor_lines[-1].strip()
+                    if ")" in last_param_line:
+                        # Extract parameter before )
+                        param_part = last_param_line[
+                            : last_param_line.index(")")
+                        ].strip()
+                        if param_part and param_part != "":
+                            if param_part.endswith(","):
+                                param_part = param_part[:-1]
+                            params.append(param_part)
+
+                # Find max type length for alignment including memory/storage/calldata
+                max_type_with_modifier_length = 0
+                param_parts = []
+
+                for param in params:
+                    if not param:  # Skip empty params
+                        continue
+                    # Split parameter into type and name parts
+                    parts = param.split()
+                    if len(parts) >= 2:
+                        # Handle array types like "address[] memory"
+                        if (
+                            "memory" in parts
+                            or "storage" in parts
+                            or "calldata" in parts
+                        ):
+                            type_part = " ".join(parts[:-2])
+                            memory_part = parts[-2]
+                            name_part = parts[-1]
+                            param_parts.append((type_part, memory_part, name_part))
+                            # Calculate length including memory/storage/calldata
+                            full_type_length = (
+                                len(type_part) + 1 + len(memory_part)
+                            )  # +1 for space
+                            max_type_with_modifier_length = max(
+                                max_type_with_modifier_length, full_type_length
+                            )
+                        else:
+                            type_part = parts[0]
+                            # Handle uint256 -> uint conversion
+                            if type_part == "uint256":
+                                type_part = "uint"
+                            name_part = " ".join(parts[1:])
+                            param_parts.append((type_part, None, name_part))
+                            max_type_with_modifier_length = max(
+                                max_type_with_modifier_length, len(type_part)
+                            )
+
+                # Rebuild constructor with aligned parameters
+                new_lines = [constructor_lines[0]]
+
+                for idx, (type_part, memory_part, name_part) in enumerate(param_parts):
+                    if memory_part:
+                        # For params with memory/storage/calldata
+                        current_length = (
+                            len(type_part) + 1 + len(memory_part)
+                        )  # +1 for space
+                        padding_after_type = " " * (
+                            max_type_with_modifier_length - current_length + 1
+                        )
+                        aligned_param = (
+                            f"{type_part} {memory_part}{padding_after_type}{name_part}"
+                        )
+                    else:
+                        # For simple type params
+                        padding_after_type = " " * (
+                            max_type_with_modifier_length - len(type_part) + 1
+                        )
+                        aligned_param = f"{type_part}{padding_after_type}{name_part}"
+
+                    if idx < len(param_parts) - 1:
+                        new_lines.append(f"{indent}    {aligned_param},")
+                    else:
+                        new_lines.append(f"{indent}    {aligned_param}")
+
+                # Add closing parenthesis with double space before {
+                if extra_after_paren == " {":
+                    extra_after_paren = "  {"
+                new_lines.append(f"{indent}){extra_after_paren}")
+
+                # Replace the old lines with new ones
+                result[
+                    constructor_start : constructor_start + len(constructor_lines)
+                ] = new_lines
+                i = constructor_start + len(new_lines)
+                continue
+
+        i += 1
+
+    return result
+
+
 def format_variable_assignments(lines: List[str]) -> List[str]:
     """Format variable assignments with aligned = operators"""
     assignment_groups = find_assignment_groups(lines)
@@ -319,6 +464,7 @@ def format_solidity(code: str) -> str:
         format_import_statements,
         format_variable_declarations,
         format_function_declarations,
+        format_constructors,
         format_variable_assignments,
     ]
 

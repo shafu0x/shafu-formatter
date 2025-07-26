@@ -6,4 +6,7 @@ contract Escrow {
     address public beneficiary;
     uint    public depositor;
     bytes32 public data;
+
+    uint public shafu;
+    uint public shafu3;
 }

@@ -5,4 +5,5 @@ contract Escrow {
     uint public arbiter;
     address public beneficiary;
     uint public depositor;
+    bytes32 public data;
 }

@@ -334,7 +334,9 @@ def format_constructors(lines: List[str]) -> List[str]:
                             name_part = parts[-1]
                             param_parts.append((type_part, memory_part, name_part))
                             max_type_length = max(max_type_length, len(type_part))
-                            max_modifier_length = max(max_modifier_length, len(memory_part))
+                            max_modifier_length = max(
+                                max_modifier_length, len(memory_part)
+                            )
                         else:
                             type_part = parts[0]
                             # Handle uint256 -> uint conversion
@@ -351,11 +353,15 @@ def format_constructors(lines: List[str]) -> List[str]:
                     if memory_part:
                         # For params with memory/storage/calldata
                         type_padding = " " * (max_type_length - len(type_part) + 1)
-                        modifier_padding = " " * (max_modifier_length - len(memory_part) + 1)
+                        modifier_padding = " " * (
+                            max_modifier_length - len(memory_part) + 1
+                        )
                         aligned_param = f"{type_part}{type_padding}{memory_part}{modifier_padding}{name_part}"
                     else:
                         # For simple type params - they need extra padding to account for missing modifier
-                        type_padding = " " * (max_type_length - len(type_part) + max_modifier_length + 2)
+                        type_padding = " " * (
+                            max_type_length - len(type_part) + max_modifier_length + 2
+                        )
                         aligned_param = f"{type_part}{type_padding}{name_part}"
 
                     if idx < len(param_parts) - 1:
@@ -383,11 +389,11 @@ def format_constructors(lines: List[str]) -> List[str]:
 def format_require_statements(lines: List[str]) -> List[str]:
     """Format require statements with aligned conditions and error messages"""
     result = lines.copy()
-    
+
     # Find groups of consecutive require statements
     require_groups = []
     current_group = []
-    
+
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("require(") and not line.strip().startswith("//"):
@@ -396,10 +402,10 @@ def format_require_statements(lines: List[str]) -> List[str]:
             if len(current_group) > 1:
                 require_groups.append(current_group)
             current_group = []
-    
+
     if len(current_group) > 1:
         require_groups.append(current_group)
-    
+
     # Process each group
     for group in require_groups:
         # Parse require statements
@@ -408,100 +414,119 @@ def format_require_statements(lines: List[str]) -> List[str]:
         max_operator_length = 0
         max_right_length = 0
         has_operators = False
-        
+
         for line_idx in group:
             line = lines[line_idx]
             indent = line[: len(line) - len(line.lstrip())]
             stripped = line.strip()
-            
+
             # Extract condition and error from require statement
             if "require(" in stripped and "," in stripped:
                 # Find the matching parenthesis
                 paren_count = 0
                 condition_end = -1
                 for i, char in enumerate(stripped):
-                    if char == '(':
+                    if char == "(":
                         paren_count += 1
-                    elif char == ')':
+                    elif char == ")":
                         paren_count -= 1
                         if paren_count == 0:
                             condition_end = i
                             break
-                
+
                 if condition_end > 0:
                     # Extract the full require content
                     require_content = stripped[8:condition_end]  # Skip "require("
-                    
+
                     # Find the last comma that separates condition from error
                     comma_positions = []
                     paren_depth = 0
                     for i, char in enumerate(require_content):
-                        if char == '(':
+                        if char == "(":
                             paren_depth += 1
-                        elif char == ')':
+                        elif char == ")":
                             paren_depth -= 1
-                        elif char == ',' and paren_depth == 0:
+                        elif char == "," and paren_depth == 0:
                             comma_positions.append(i)
-                    
+
                     if comma_positions:
                         last_comma = comma_positions[-1]
                         condition = require_content[:last_comma].strip()
-                        error_part = require_content[last_comma + 1:].strip()
-                        
+                        error_part = require_content[last_comma + 1 :].strip()
+
                         # Parse the condition to find operators
                         # Common operators in order of precedence (longest first to avoid splitting <=)
-                        operators = ['<=', '>=', '==', '!=', '<', '>', '&&', '||']
+                        operators = ["<=", ">=", "==", "!=", "<", ">", "&&", "||"]
                         operator_found = None
                         operator_pos = -1
-                        
+
                         for op in operators:
                             if op in condition:
                                 # Find the operator position (not inside parentheses)
                                 paren_depth = 0
                                 for i in range(len(condition) - len(op) + 1):
-                                    substring = condition[i:i+len(op)]
+                                    substring = condition[i : i + len(op)]
                                     # Check paren depth at this position
                                     for j in range(i):
-                                        if condition[j] == '(':
+                                        if condition[j] == "(":
                                             paren_depth += 1
-                                        elif condition[j] == ')':
+                                        elif condition[j] == ")":
                                             paren_depth -= 1
-                                    
+
                                     if substring == op and paren_depth == 0:
                                         operator_found = op
                                         operator_pos = i
                                         break
-                                
+
                                 if operator_found:
                                     break
-                        
+
                         if operator_found and operator_pos >= 0:
                             left_part = condition[:operator_pos].strip()
-                            right_part = condition[operator_pos + len(operator_found):].strip()
-                            
-                            require_data.append((line_idx, indent, left_part, operator_found, right_part, error_part))
+                            right_part = condition[
+                                operator_pos + len(operator_found) :
+                            ].strip()
+
+                            require_data.append(
+                                (
+                                    line_idx,
+                                    indent,
+                                    left_part,
+                                    operator_found,
+                                    right_part,
+                                    error_part,
+                                )
+                            )
                             max_left_length = max(max_left_length, len(left_part))
-                            max_operator_length = max(max_operator_length, len(operator_found))
+                            max_operator_length = max(
+                                max_operator_length, len(operator_found)
+                            )
                             max_right_length = max(max_right_length, len(right_part))
                             has_operators = True
                         else:
                             # No operator found, treat as simple condition
-                            require_data.append((line_idx, indent, condition, "", "", error_part))
+                            require_data.append(
+                                (line_idx, indent, condition, "", "", error_part)
+                            )
                             # For lines without operators, we still need to account for left side alignment
-                            if has_operators or any(len(d) == 6 and d[3] for d in require_data if len(d) == 6):
+                            if has_operators or any(
+                                len(d) == 6 and d[3]
+                                for d in require_data
+                                if len(d) == 6
+                            ):
                                 max_left_length = max(max_left_length, len(condition))
-        
+
         # Calculate the maximum condition length to determine error alignment
         max_condition_length = 0
         conditions_list = []
-        
+
         for data in require_data:
             if len(data) == 6:  # Has data
                 line_idx, indent, left, op, right, error = data
-                
+
                 # Align left side for all lines
                 left_padding = " " * (max_left_length - len(left))
-                
+
                 # Build condition string
                 if op:
                     op_padding = " " * (max_operator_length - len(op))
@@ -509,25 +534,29 @@ def format_require_statements(lines: List[str]) -> List[str]:
                 else:
                     # For lines without operators, we need to leave space as if there was an operator
                     condition_str = left
-                
+
                 conditions_list.append((line_idx, indent, condition_str, error, op))
                 if op:  # Only count lines with operators for max length
                     max_condition_length = max(max_condition_length, len(condition_str))
-        
+
         # Rebuild require statements with proper error alignment
         for line_idx, indent, condition_str, error, op in conditions_list:
             if op:
                 # Lines with operators - normal padding
                 padding_after_comma = " " * (max_condition_length - len(condition_str))
-                aligned_require = f"{indent}require({condition_str},{padding_after_comma} {error});"
+                aligned_require = (
+                    f"{indent}require({condition_str},{padding_after_comma} {error});"
+                )
             else:
                 # Lines without operators - special handling
                 # Calculate padding to align with the longest condition
-                padding_after_condition = " " * (max_condition_length - len(condition_str))
+                padding_after_condition = " " * (
+                    max_condition_length - len(condition_str)
+                )
                 aligned_require = f"{indent}require({condition_str},{padding_after_condition} {error});"
-            
+
             result[line_idx] = aligned_require
-    
+
     return result
 
 

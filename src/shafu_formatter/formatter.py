@@ -24,6 +24,38 @@ def format_function_declarations(lines):
     return new_lines
 
 
+def format_variable_assignments(lines):
+    # Pattern to match variable assignments with = operator
+    assignment_pattern = r'^(\s*)(\w+\s+\w+)\s*=\s*(.+)$'
+    
+    # Find all assignment lines and their positions
+    assignments = []
+    for i, line in enumerate(lines):
+        match = re.match(assignment_pattern, line)
+        if match:
+            indent = match.group(1)
+            variable_declaration = match.group(2)
+            value = match.group(3)
+            assignments.append({
+                'index': i,
+                'indent': indent,
+                'variable_declaration': variable_declaration,
+                'value': value
+            })
+    
+    # Find the longest variable declaration in this block
+    if assignments:
+        max_length = max(len(assignment['variable_declaration']) for assignment in assignments)
+        
+        # Format each assignment with aligned = operators
+        for assignment in assignments:
+            spaces_needed = max_length - len(assignment['variable_declaration'])
+            padding = ' ' * spaces_needed
+            lines[assignment['index']] = f"{assignment['indent']}{assignment['variable_declaration']}{padding} = {assignment['value']}"
+    
+    return lines
+
+
 def find_variable_declaration_blocks(lines):
     pattern = r'^(\s*)(uint\d*|address|bool|bytes\d*|string)(\s+)(public|private|internal|external)(.*)$'
     declaration_blocks = []
@@ -84,5 +116,8 @@ def format_solidity(code):
     
     # Then format variable declarations
     lines = format_variable_declarations(lines)
+    
+    # Finally format variable assignments
+    lines = format_variable_assignments(lines)
     
     return '\n'.join(lines) 

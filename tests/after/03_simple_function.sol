@@ -6,7 +6,6 @@ contract Escrow {
         external 
     {
         address oldRecipient = feeRecipient;
-        feeRecipient = newRec;
-        emit FeeRecipientSet(oldRecipient, newRec);
+        emit FeeRecipientSet(oldRecipient);
     }
 }

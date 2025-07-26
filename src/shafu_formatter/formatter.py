@@ -575,41 +575,123 @@ def format_variable_assignments(lines: List[str]) -> List[str]:
 
         for line_idx, parts in group:
             var_tokens = parts[0].split()
-            if len(var_tokens) >= 3 and var_tokens[1] in [
-                "storage",
-                "memory",
-                "calldata",
-            ]:
+            if len(var_tokens) >= 3 and var_tokens[1] in ["storage", "memory", "calldata"]:
                 modifier_lines.append((line_idx, parts))
             else:
                 simple_lines.append((line_idx, parts))
 
-        # Format modifier lines separately from simple lines
-        if modifier_lines:
-            format_complex_assignments(modifier_lines, lines, result)
+        # Decide how to handle based on the number of complex lines
+        if len(modifier_lines) > 1:
+            # Multiple complex lines - handle simple and complex separately
+            if modifier_lines:
+                format_complex_assignments(modifier_lines, lines, result)
+            
+            if simple_lines:
+                # Simple alignment for lines without modifiers
+                max_var_length = max(len(parts[0]) for line_idx, parts in simple_lines)
 
-        if simple_lines:
-            # Simple alignment for lines without modifiers
-            max_var_length = max(len(parts[0]) for line_idx, parts in simple_lines)
+                for line_idx, parts in simple_lines:
+                    var_part, value_part = parts
+                    padding_needed = max_var_length - len(var_part)
+                    padding = " " * padding_needed
 
-            for line_idx, parts in simple_lines:
-                var_part, value_part = parts
-                padding_needed = max_var_length - len(var_part)
-                padding = " " * padding_needed
+                    original_line = lines[line_idx]
+                    indent = original_line[
+                        : len(original_line) - len(original_line.lstrip())
+                    ]
 
-                original_line = lines[line_idx]
-                indent = original_line[
-                    : len(original_line) - len(original_line.lstrip())
-                ]
-
-                result[line_idx] = f"{indent}{var_part}{padding} = {value_part}"
+                    result[line_idx] = f"{indent}{var_part}{padding} = {value_part}"
+        
+        elif len(modifier_lines) == 1:
+            # Single complex line - align simple lines with it
+            format_complex_assignments(group, lines, result)
+        
+        else:
+            # No complex lines - simple alignment with array handling
+            format_simple_assignments_with_arrays(group, lines, result)
 
     return result
 
 
+def format_simple_assignments_with_arrays(group, lines, result):
+    """Format simple assignments with array alignment"""
+    # Parse each assignment
+    parsed_assignments = []
+    max_type_length = 0
+    max_var_length = 0
+    max_array_name_length = 0
+
+    for line_idx, parts in group:
+        var_part, value_part = parts
+        var_tokens = var_part.split()
+        
+        # Check for array access to find max array name length
+        if "[" in value_part:
+            bracket_pos = value_part.find("[")
+            array_name = value_part[:bracket_pos].strip()
+            max_array_name_length = max(max_array_name_length, len(array_name))
+
+        if len(var_tokens) >= 2:
+            type_part = var_tokens[0]
+            var_name = " ".join(var_tokens[1:])
+            
+            parsed_assignments.append((line_idx, type_part, var_name, value_part))
+            max_type_length = max(max_type_length, len(type_part))
+            max_var_length = max(max_var_length, len(var_name))
+        else:
+            # Just variable (shouldn't happen in well-formed code)
+            parsed_assignments.append((line_idx, "", var_part, value_part))
+            max_var_length = max(max_var_length, len(var_part))
+
+    # Check if we need two-column alignment
+    has_arrays = any("[" in value_part for _, _, _, value_part in parsed_assignments)
+    has_different_types = len(set(type_part for _, type_part, _, _ in parsed_assignments)) > 1
+    
+    # Use two-column alignment if we have arrays OR different types
+    use_two_column = has_arrays or has_different_types
+    
+    # Rebuild with alignment
+    for line_idx, type_part, var_name, value_part in parsed_assignments:
+        original_line = lines[line_idx]
+        indent = original_line[: len(original_line) - len(original_line.lstrip())]
+
+        if use_two_column:
+            # Use two-column alignment 
+            type_padding = " " * (max_type_length - len(type_part))
+            var_padding = " " * (max_var_length - len(var_name))
+            
+            # Handle array spacing
+            if "[" in value_part and (
+                value_part.strip().endswith("]") or value_part.strip().endswith("];")
+            ):
+                bracket_pos = value_part.find("[")
+                array_name = value_part[:bracket_pos].strip()
+                array_index = value_part[bracket_pos:].strip()
+
+                # Add spacing to align array names
+                array_padding = " " * (max_array_name_length - len(array_name))
+                value_part = f"{array_name}{array_padding}{array_index}"
+            
+            result[line_idx] = f"{indent}{type_part}{type_padding} {var_name}{var_padding} = {value_part}"
+        else:
+            # Simple alignment without arrays and same types
+            var_part_full = f"{type_part} {var_name}" if type_part else var_name
+            max_var_part_length = max(len(f"{tp} {vn}" if tp else vn) for _, tp, vn, _ in parsed_assignments)
+            padding_needed = max_var_part_length - len(var_part_full)
+            padding = " " * padding_needed
+            
+            result[line_idx] = f"{indent}{var_part_full}{padding} = {value_part}"
+
+
 def format_complex_assignments(group, lines, result):
     """Format assignments with storage/memory modifiers using three-column alignment"""
-    # Parse each assignment - all should have modifiers now
+    # Check if this is a mixed group or complex-only group
+    has_simple_lines = any(
+        len(parts[0].split()) < 3 or parts[0].split()[1] not in ["storage", "memory", "calldata"]
+        for line_idx, parts in group
+    )
+    
+    # Parse each assignment
     parsed_assignments = []
     max_type_length = 0
     max_modifier_length = 0
@@ -620,47 +702,70 @@ def format_complex_assignments(group, lines, result):
         var_part, value_part = parts
         var_tokens = var_part.split()
 
-        # All lines in this group should have modifiers
-        type_part = var_tokens[0]
-        modifier = var_tokens[1]
-        var_name = " ".join(var_tokens[2:])
-
         # Check for array access to find max array name length
         if "[" in value_part:
             bracket_pos = value_part.find("[")
             array_name = value_part[:bracket_pos].strip()
             max_array_name_length = max(max_array_name_length, len(array_name))
 
-        parsed_assignments.append((line_idx, type_part, modifier, var_name, value_part))
-        max_type_length = max(max_type_length, len(type_part))
-        max_modifier_length = max(max_modifier_length, len(modifier))
-        max_var_length = max(max_var_length, len(var_name))
+        if len(var_tokens) >= 3 and var_tokens[1] in ["storage", "memory", "calldata"]:
+            # Has modifier
+            type_part = var_tokens[0]
+            modifier = var_tokens[1]
+            var_name = " ".join(var_tokens[2:])
+            
+            parsed_assignments.append((line_idx, type_part, modifier, var_name, value_part))
+            max_type_length = max(max_type_length, len(type_part))
+            max_modifier_length = max(max_modifier_length, len(modifier))
+            max_var_length = max(max_var_length, len(var_name))
+        else:
+            # No modifier - simple assignment
+            type_part = var_tokens[0]
+            var_name = " ".join(var_tokens[1:]) if len(var_tokens) > 1 else ""
+            
+            parsed_assignments.append((line_idx, type_part, None, var_name, value_part))
+            max_type_length = max(max_type_length, len(type_part))
+            max_var_length = max(max_var_length, len(var_name))
 
     # Rebuild with alignment
     for line_idx, type_part, modifier, var_name, value_part in parsed_assignments:
         original_line = lines[line_idx]
         indent = original_line[: len(original_line) - len(original_line.lstrip())]
 
-        # Use three column alignment
-        type_padding = " " * (max_type_length - len(type_part))
-        modifier_padding = " " * (max_modifier_length - len(modifier))
-        var_padding = " " * (max_var_length - len(var_name))
+        if modifier:
+            # Use three column alignment for lines with modifiers
+            type_padding = " " * (max_type_length - len(type_part))
+            modifier_padding = " " * (max_modifier_length - len(modifier))
+            var_padding = " " * (max_var_length - len(var_name))
 
-        # Special handling for array access in value
-        if "[" in value_part and (
-            value_part.strip().endswith("]") or value_part.strip().endswith("];")
-        ):
-            bracket_pos = value_part.find("[")
-            array_name = value_part[:bracket_pos].strip()
-            array_index = value_part[bracket_pos:].strip()
+            # Special handling for array access in value
+            if "[" in value_part and (
+                value_part.strip().endswith("]") or value_part.strip().endswith("];")
+            ):
+                bracket_pos = value_part.find("[")
+                array_name = value_part[:bracket_pos].strip()
+                array_index = value_part[bracket_pos:].strip()
 
-            # Add spacing to align array names
-            array_padding = " " * (max_array_name_length - len(array_name))
-            value_part = f"{array_name}{array_padding}{array_index}"
+                # Add spacing to align array names
+                array_padding = " " * (max_array_name_length - len(array_name))
+                value_part = f"{array_name}{array_padding}{array_index}"
 
-        result[line_idx] = (
-            f"{indent}{type_part}{type_padding} {modifier}{modifier_padding} {var_name}{var_padding} = {value_part}"
-        )
+            result[line_idx] = (
+                f"{indent}{type_part}{type_padding} {modifier}{modifier_padding} {var_name}{var_padding} = {value_part}"
+            )
+        else:
+            # Simple line - only align with complex lines if this is a mixed group
+            if has_simple_lines and max_modifier_length > 0:
+                # Mixed group - use three-column style alignment for simple lines
+                type_padding = " " * (max_type_length - len(type_part))
+                # Use modifier space for padding
+                modifier_space = " " * (max_modifier_length + 1)  # +1 for space after modifier
+                var_padding = " " * (max_var_length - len(var_name))
+                
+                result[line_idx] = f"{indent}{type_part}{type_padding} {modifier_space}{var_name}{var_padding} = {value_part}"
+            else:
+                # This shouldn't happen with current logic, but fallback to simple
+                result[line_idx] = f"{indent}{type_part} {var_name} = {value_part}"
 
 
 def find_assignment_groups(lines: List[str]) -> List[List[Tuple[int, Tuple[str, str]]]]:

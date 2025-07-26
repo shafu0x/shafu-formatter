@@ -18,11 +18,9 @@ def test_all():
     passed = 0
     failed = 0
     
-    for before_file in before_dir.glob("*"):
+    for before_file in sorted(before_dir.glob("*")):
         if before_file.is_file():
             after_file = after_dir / before_file.name
-            
-            print(f"\nTesting {before_file.name}...")
             
             if not after_file.exists():
                 print(f"❌ Missing {after_file}")
@@ -34,10 +32,10 @@ def test_all():
             result = format_solidity(input_content)
             
             if result.strip() == expected_content.strip():
-                print("✅ PASSED")
+                print(f"✅ {before_file.name}")
                 passed += 1
             else:
-                print("❌ FAILED")
+                print(f"❌ {before_file.name} - FAILED")
                 print(f"Expected:\n{expected_content}")
                 print(f"Got:\n{result}")
                 failed += 1

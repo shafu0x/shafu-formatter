@@ -617,6 +617,86 @@ def find_assignment_groups(lines: List[str]) -> List[List[Tuple[int, Tuple[str, 
     return groups
 
 
+def format_struct_assignments(lines: List[str]) -> List[str]:
+    """Format struct field assignments with aligned colons"""
+    result = lines.copy()
+    i = 0
+    
+    while i < len(result):
+        line = result[i]
+        
+        # Look for lines that might start a struct initialization
+        if "{" in line and "(" in line and not line.strip().startswith("//"):
+            # Find the opening brace
+            brace_pos = line.find("{")
+            if brace_pos > 0:
+                # Check if this looks like a struct initialization
+                before_brace = line[:brace_pos].strip()
+                if before_brace.endswith("(") or "= " in before_brace:
+                    # Collect all lines of the struct
+                    struct_lines = []
+                    struct_start = i
+                    j = i
+                    
+                    # Find all lines until the closing brace
+                    brace_count = 0
+                    while j < len(result):
+                        current_line = result[j]
+                        struct_lines.append(j)
+                        
+                        # Count braces to find the end
+                        brace_count += current_line.count("{") - current_line.count("}")
+                        
+                        if brace_count == 0 and "}" in current_line:
+                            break
+                        j += 1
+                    
+                    # Process struct fields
+                    if len(struct_lines) > 2:  # At least opening, one field, and closing
+                        field_data = []
+                        max_field_name_length = 0
+                        
+                        # Parse each field line
+                        for line_idx in struct_lines[1:-1]:  # Skip first and last lines
+                            field_line = result[line_idx]
+                            stripped = field_line.strip()
+                            
+                            # Skip empty lines and comments
+                            if not stripped or stripped.startswith("//"):
+                                continue
+                            
+                            # Look for field assignments (field: value)
+                            if ":" in stripped:
+                                colon_pos = stripped.find(":")
+                                field_name = stripped[:colon_pos].strip()
+                                field_value = stripped[colon_pos + 1:].strip()
+                                
+                                # Remove trailing comma if present
+                                if field_value.endswith(","):
+                                    has_comma = True
+                                    field_value = field_value[:-1].strip()
+                                else:
+                                    has_comma = False
+                                
+                                field_data.append((line_idx, field_name, field_value, has_comma))
+                                max_field_name_length = max(max_field_name_length, len(field_name))
+                        
+                        # Rebuild struct with aligned fields
+                        if field_data:
+                            for line_idx, field_name, field_value, has_comma in field_data:
+                                indent = result[line_idx][: len(result[line_idx]) - len(result[line_idx].lstrip())]
+                                padding = " " * (max_field_name_length - len(field_name))
+                                comma = "," if has_comma else ""
+                                result[line_idx] = f"{indent}{field_name}:{padding} {field_value}{comma}"
+                    
+                    i = j + 1
+                    continue
+        
+        i += 1
+    
+    return result
+
+
 def add_double_space_before_brace(lines: List[str]) -> List[str]:
     """Add double space before opening brace in function/constructor declarations"""
     result = []
@@ -645,6 +725,7 @@ def format_solidity(code: str) -> str:
         format_function_declarations,
         format_constructors,
         format_require_statements,
+        format_struct_assignments,
         format_variable_assignments,
         add_double_space_before_brace,
     ]

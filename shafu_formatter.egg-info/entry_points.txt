@@ -1,0 +1,2 @@
+[console_scripts]
+shafu = formatter:main

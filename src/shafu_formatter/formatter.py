@@ -407,6 +407,7 @@ def format_require_statements(lines: List[str]) -> List[str]:
         max_left_length = 0
         max_operator_length = 0
         max_right_length = 0
+        has_operators = False
         
         for line_idx in group:
             line = lines[line_idx]
@@ -482,35 +483,49 @@ def format_require_statements(lines: List[str]) -> List[str]:
                             max_left_length = max(max_left_length, len(left_part))
                             max_operator_length = max(max_operator_length, len(operator_found))
                             max_right_length = max(max_right_length, len(right_part))
+                            has_operators = True
                         else:
                             # No operator found, treat as simple condition
                             require_data.append((line_idx, indent, condition, "", "", error_part))
-                            max_left_length = max(max_left_length, len(condition))
+                            # For lines without operators, we still need to account for left side alignment
+                            if has_operators or any(len(d) == 6 and d[3] for d in require_data if len(d) == 6):
+                                max_left_length = max(max_left_length, len(condition))
         
         # Calculate the maximum condition length to determine error alignment
         max_condition_length = 0
         conditions_list = []
         
         for data in require_data:
-            if len(data) == 6:  # Has operator
+            if len(data) == 6:  # Has data
                 line_idx, indent, left, op, right, error = data
-                left_padding = " " * (max_left_length - len(left))
-                op_padding = " " * (max_operator_length - len(op))
                 
-                # Build condition with alignment
+                # Align left side for all lines
+                left_padding = " " * (max_left_length - len(left))
+                
+                # Build condition string
                 if op:
+                    op_padding = " " * (max_operator_length - len(op))
                     condition_str = f"{left}{left_padding} {op}{op_padding} {right}"
                 else:
-                    condition_str = f"{left}{left_padding}"
+                    # For lines without operators, we need to leave space as if there was an operator
+                    condition_str = left
                 
-                conditions_list.append((line_idx, indent, condition_str, error))
-                max_condition_length = max(max_condition_length, len(condition_str))
+                conditions_list.append((line_idx, indent, condition_str, error, op))
+                if op:  # Only count lines with operators for max length
+                    max_condition_length = max(max_condition_length, len(condition_str))
         
         # Rebuild require statements with proper error alignment
-        for line_idx, indent, condition_str, error in conditions_list:
-            # Add padding after comma to align errors
-            padding_after_comma = " " * (max_condition_length - len(condition_str))
-            aligned_require = f"{indent}require({condition_str},{padding_after_comma} {error});"
+        for line_idx, indent, condition_str, error, op in conditions_list:
+            if op:
+                # Lines with operators - normal padding
+                padding_after_comma = " " * (max_condition_length - len(condition_str))
+                aligned_require = f"{indent}require({condition_str},{padding_after_comma} {error});"
+            else:
+                # Lines without operators - special handling
+                # Calculate padding to align with the longest condition
+                padding_after_condition = " " * (max_condition_length - len(condition_str))
+                aligned_require = f"{indent}require({condition_str},{padding_after_condition} {error});"
+            
             result[line_idx] = aligned_require
     
     return result
